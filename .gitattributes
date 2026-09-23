@@ -1,0 +1,13 @@
+# Windows PowerShell 5.1 scripts use UTF-8 BOM; Git preserves the BOM.
+* text=auto
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.editorconfig text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.cs text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.exe binary
+*.zip binary
+*.pow binary

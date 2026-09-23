@@ -1,0 +1,33 @@
+# Generated releases, build intermediates, test results and local archives
+/dist/
+/artifacts/
+/.local/
+
+# Previous project layout (kept out if an older script is used)
+/outputs/
+/work/
+/PROJECT_MIGRATION.json
+/TEST_BASELINE_*.json
+
+# Machine-specific power-plan backups and binary build products
+*.pow
+*.exe
+*.dll
+*.pdb
+*.zip
+*.pending
+*.log
+
+# Local editor / OS state and credentials
+.vs/
+.vscode/
+*.user
+*.suo
+Thumbs.db
+Desktop.ini
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
