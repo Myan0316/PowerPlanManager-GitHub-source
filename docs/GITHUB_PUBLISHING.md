@@ -1,5 +1,7 @@
 # 上传 GitHub 与发布程序
 
+> 状态更正（2026-09-24）：v0.2.0 已发布。本文“当前仓库已有的历史”描述的是整理前旧仓库，其 .git 现保存在本地历史 ZIP 中；当前源码仓库的根提交为 eddee00。现状与证据见 [开发日志](DEVELOPMENT_LOG.md)。下文保留首次上传时的操作说明。
+
 ## 适合提交的内容
 
 提交根目录的 README、`.gitignore`、`.gitattributes`、`.editorconfig`，以及 `src/`、`scripts/`、`tests/`、`docs/`。这些文件足以阅读、运行、测试和构建项目。

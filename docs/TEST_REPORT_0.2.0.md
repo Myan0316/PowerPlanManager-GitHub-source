@@ -2,6 +2,8 @@
 
 > 历史记录：下文的 work/、outputs/ 和测试证据路径表示当时的工程布局。原始文件保留于本地 .local/pre-github/，不随公开仓库提交；当前源码和测试入口见根目录 README。
 
+> 归档位置更新（2026-09-24）：上述 .local/pre-github/ 现位于本地 .local/legacy-workspace-20260924.zip 内。本报告保留历史结果，本次重新执行的验证见 [开发日志](DEVELOPMENT_LOG.md)。
+
 日期：2026-09-23。环境：本机 Windows 11 10.0.26200，Windows PowerShell 5.1.26100.9444，.NET Framework CLR 4。
 
 ## 已完成验证

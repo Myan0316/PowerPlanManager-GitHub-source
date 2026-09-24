@@ -4,6 +4,8 @@
 
 当前应用版本：**0.2.0**。实现采用 Windows PowerShell 5.1、WinForms 和系统 `powercfg.exe`；C# 启动器负责让便携 EXE 启动时不附带控制台窗口。
 
+版本、进度与历史核对见 [开发日志](docs/DEVELOPMENT_LOG.md)（2026-09-24 更新，含已发布状态、历史索引和本次回归结果）。根目录 `SOURCE_MANIFEST.sha256` 保留为原发布源码基线，不随开发中的文档修改更新。
+
 ## 使用
 
 从项目发布的 GitHub Release 下载 EXE 与对应 SHA-256 文件，或按下文自行构建。仓库只保存源码、测试和文档；EXE 发布在 Releases 中。
