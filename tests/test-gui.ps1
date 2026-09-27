@@ -36,9 +36,7 @@ function Invoke-TestButton($Button) {
     $null = $method.Invoke($Button, @([EventArgs]::Empty))
 }
 function Select-TestPlan([int]$Index) {
-    foreach ($item in $script:PlanList.Items) { $item.Selected = $false }
-    $script:PlanList.Items[$Index].Selected = $true
-    $script:PlanList.Items[$Index].Focused = $true
+    $script:PlanPicker.SelectedIndex = $Index
 }
 function Select-TestRow($Grid, [int]$Index) {
     $Grid.ClearSelection()
@@ -68,7 +66,7 @@ try {
     Assert-Gui ($testForm -is [System.Windows.Forms.Form]) 'Main form has the expected type.'
     New-TestHandles $testForm
     Refresh-PlanList
-    Assert-Gui ($script:PlanList.Items.Count -gt 0) 'Read-only live startup populates plans.'
+    Assert-Gui ($script:PlanPicker.Items.Count -gt 0) 'Read-only live startup populates plans.'
     Assert-Gui ($script:GuiTestErrors.Count -eq 0) ('Live startup errors: ' + ($script:GuiTestErrors -join '; '))
     $livePlans = @($script:Plans)
     $liveRowCount = 0
@@ -96,7 +94,7 @@ try {
                 Assert-Gui ((Get-TestInputValue $state.AcInput) -eq [string]$setting.AcValue) ('AC selection follows row: ' + $setting.Name)
                 Assert-Gui ((Get-TestInputValue $state.DcInput) -eq [string]$setting.DcValue) ('DC selection follows row: ' + $setting.Name)
                 Assert-Gui (-not [string]::IsNullOrWhiteSpace($state.RangeLabel.Text)) ('Range/choice help exists for: ' + $setting.Name)
-                if (@($setting.Choices).Count -gt 0) {
+                if (@($setting.Choices).Count -gt 0 -or (Get-FriendlySetting $setting).Time) {
                     Assert-Gui ($state.AcInput.DropDownStyle -eq [System.Windows.Forms.ComboBoxStyle]::DropDownList) 'Enumeration has a closed choice list.'
                     Assert-Gui ($state.AcInput.Items.Count -ge @($setting.Choices).Count) 'Enumeration includes all choices.'
                     $liveEnums++
@@ -115,7 +113,7 @@ try {
             Assert-Gui ($script:GuiTestUnhandled.Count -eq 0) 'No unhandled events during settings selection/disposal.'
         }
     }
-    Write-Output ('PASS live GUI: {0} plans, {1} row selections ({2} enum / {3} numeric), repeated editor open/close.' -f $livePlans.Count, $liveRowCount, $liveEnums, $liveRanges)
+    Write-Output ('PASS live GUI: {0} plans, {1} row selections ({2} enum or time preset / {3} numeric), repeated editor open/close.' -f $livePlans.Count, $liveRowCount, $liveEnums, $liveRanges)
 
     # All subsequent actions are in-memory. No test below invokes a real system
     # mutation, file picker, confirmation box, or external control panel.
@@ -189,7 +187,7 @@ try {
     Select-TestPlan 0
     Assert-Gui (-not $script:EnableButton.Enabled) 'Current plan cannot be enabled again.'
     Assert-Gui (-not $script:DeleteButton.Enabled) 'Current plan cannot be deleted.'
-    foreach ($listItem in $script:PlanList.Items) { $listItem.Selected = $false }
+    $script:PlanPicker.SelectedIndex = -1
     foreach ($button in @($script:EnableButton,$script:CreateButton,$script:RenameButton,$script:DeleteButton,$script:ExportButton,$script:EditButton)) {
         Assert-Gui (-not $button.Enabled) ('No selection disables: ' + $button.Text)
     }
@@ -220,9 +218,7 @@ try {
     Assert-Gui ($script:GuiTestPlans.Count -eq 5) 'Restore backup imports as another plan.'
     Invoke-TestButton $script:EditButton
     Assert-Gui ($script:GuiTestCalls.Contains('editor')) 'Edit button opens editor.'
-    $toolbar = @($testForm.Controls | Where-Object { $_ -is [System.Windows.Forms.FlowLayoutPanel] })[0]
-    $controlPanelButton = @($toolbar.Controls | Where-Object { $_.Text -like '*系统电源*' })[0]
-    Invoke-TestButton $controlPanelButton
+    Invoke-TestButton $script:ControlPanelButton
     Assert-Gui ($script:GuiTestCalls.Contains('control-panel')) 'Control-panel button uses the guarded opener.'
     Invoke-TestButton $script:RefreshButton
     Assert-GuiReady
@@ -252,8 +248,8 @@ try {
 
     foreach ($failureCase in @(@('enable','EnableButton'),@('create','CreateButton'),@('rename','RenameButton'),@('delete','DeleteButton'),@('export','ExportButton'),@('import','ImportButton'),@('import','RestoreButton'),@('editor','EditButton'))) {
         Refresh-PlanList
-        for ($idx = 0; $idx -lt $script:PlanList.Items.Count; $idx++) {
-            if ($script:PlanList.Items[$idx].Tag.Id -ne $script:GuiTestActive) { Select-TestPlan $idx; break }
+        for ($idx = 0; $idx -lt $script:PlanPicker.Items.Count; $idx++) {
+            if ($script:PlanPicker.Items[$idx].Id -ne $script:GuiTestActive) { Select-TestPlan $idx; break }
         }
         $button = Get-Variable -Name $failureCase[1] -Scope Script -ValueOnly
         $errorsBefore = $script:GuiTestErrors.Count

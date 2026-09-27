@@ -31,7 +31,7 @@ internal static class PowerPlanLauncher
             string directory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
             string script = Path.Combine(directory, "PowerPlanManager.ps1");
             string core = Path.Combine(directory, "PowerPlan.Core.ps1");
-            if (!File.Exists(script) || !File.Exists(core))
+            if (!File.Exists(script) || !File.Exists(core) || !File.Exists(Path.Combine(directory, "PowerPlan.UI.ps1")))
                 throw new FileNotFoundException("The application package is incomplete. Please extract or download the complete package again.");
             string host = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
             StringBuilder command = new StringBuilder("-NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File ");
@@ -54,14 +54,14 @@ internal static class PowerPlanLauncher
                 {
                     if (error.Length > 4000) error = error.Substring(0, 4000);
                     MessageBox.Show("Power Plan Manager could not finish.\r\n" + error,
-                        "Power Plan Manager 0.2.0 - startup error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        "Power Plan Manager 0.3.1 - startup error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 return process.ExitCode;
             }
         }
         catch (Exception error)
         {
-            MessageBox.Show(error.Message, "Power Plan Manager 0.2.0 - launcher error",
+            MessageBox.Show(error.Message, "Power Plan Manager 0.3.1 - launcher error",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }

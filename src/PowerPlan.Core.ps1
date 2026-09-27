@@ -1,5 +1,107 @@
 ﻿$script:PowerCfgPath = Join-Path $env:SystemRoot 'System32\powercfg.exe'
 $script:LastBackupPath = $null
+$script:VisibilityBackupRoot = Join-Path $env:LOCALAPPDATA 'PowerPlanManager\VisibilityBackups'
+
+# Read each node separately: PowerReadSettingAttributes returns a merged group/setting mask.
+function Get-PowerAttributeState([string]$GroupId,[string]$SettingId) {
+    $group=Resolve-PowerPlanGuid $GroupId
+    $path='SYSTEM\CurrentControlSet\Control\Power\PowerSettings'
+    if($group -ne 'fea3413e-7e05-4911-9a71-700331f1c294'){$path+='\'+$group}
+    elseif(-not $SettingId){return [pscustomobject]@{GroupId=$group;SettingId='';Exists=$false;Kind='Missing';Value=$null;Hidden=$false}}
+    if($SettingId){$path+='\'+(Resolve-PowerPlanGuid $SettingId)}
+    $key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($path,$false)
+    try{
+        if($null -eq $key){throw '该设置节点不存在，请刷新。'}
+        $exists='Attributes' -in $key.GetValueNames()
+        $kind=if($exists){[string]$key.GetValueKind('Attributes')}else{'Missing'}
+        $value=if($kind -eq 'DWord'){[BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$key.GetValue('Attributes')),0)}else{$null}
+        return [pscustomobject]@{GroupId=$group;SettingId=$SettingId;Exists=$exists;Kind=$kind;Value=$value;Hidden=($kind -eq 'DWord' -and ($value -band 1) -ne 0)}
+    }finally{if($null -ne $key){$key.Dispose()}}
+}
+function Set-PowerAttributeValue([string]$GroupId,[string]$SettingId,[uint32]$Value) {
+    $group=[guid](Resolve-PowerPlanGuid $GroupId)
+    if(-not ('PowerPlanVisibilityNative' -as [type])){
+        Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class PowerPlanVisibilityNative {
+    [DllImport("powrprof.dll")] public static extern uint PowerWriteSettingAttributes(ref Guid group, IntPtr setting, uint attributes);
+}
+'@
+    }
+    $pointer=[IntPtr]::Zero
+    try{
+        if($SettingId){$setting=[guid](Resolve-PowerPlanGuid $SettingId);$pointer=[Runtime.InteropServices.Marshal]::AllocHGlobal(16);[Runtime.InteropServices.Marshal]::StructureToPtr($setting,$pointer,$false)}
+        $result=[PowerPlanVisibilityNative]::PowerWriteSettingAttributes([ref]$group,$pointer,$Value)
+        if($result -ne 0){throw ('显示属性未写入（系统错误 {0}）。权限不足时，请以管理员身份重新打开程序。' -f $result)}
+    }finally{if($pointer -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::FreeHGlobal($pointer)}}
+}
+function Get-VisibilityMachineId {
+    $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)
+    $key=$null
+    try{$key=$base.OpenSubKey('SOFTWARE\Microsoft\Cryptography');$id=[string]$key.GetValue('MachineGuid');if(-not $id){throw '无法确认本机标识，已停止属性修改。'};return $id}finally{if($key){$key.Dispose()};$base.Dispose()}
+}
+function Write-VisibilityRecord($Record,[string]$Path) {
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))
+    $pending=$Path+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
+    try{
+        [IO.File]::WriteAllText($pending,($Record | ConvertTo-Json -Depth 5),(New-Object Text.UTF8Encoding($false)))
+        if([IO.File]::Exists($Path)){[IO.File]::Replace($pending,$Path,($Path+'.bak'))}else{[IO.File]::Move($pending,$Path)}
+    }finally{if([IO.File]::Exists($pending)){[IO.File]::Delete($pending)}}
+}
+function Read-VisibilityRecord([string]$Path) {
+    $full=[IO.Path]::GetFullPath($Path);$root=[IO.Path]::GetFullPath($script:VisibilityBackupRoot).TrimEnd('\')+'\'
+    if(-not $full.StartsWith($root,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetExtension($full) -ne '.json'){throw '恢复文件不在本程序的显示属性备份目录中。'}
+    if((Get-Item -LiteralPath $full).Length -gt 16384){throw '显示属性备份过大。'}
+    $record=[IO.File]::ReadAllText($full) | ConvertFrom-Json
+    if($record.Schema -ne 1 -or $record.Machine -ne (Get-VisibilityMachineId)){throw '备份格式不支持或来自其他电脑，不能恢复。'}
+    $null=Resolve-PowerPlanGuid $record.GroupId
+    if($record.SettingId){$null=Resolve-PowerPlanGuid $record.SettingId}
+    $before=ConvertFrom-PowerCfgNumber ([string]$record.Before)
+    $after=ConvertFrom-PowerCfgNumber ([string]$record.After)
+    if($null -eq $before -or $null -eq $after -or ($before -band 1) -ne 1 -or $after -ne ($before -band [uint64]4294967294) -or $record.Kind -ne 'DWord' -or $record.Phase -notin @('Prepared','Applied','Restored')){throw '显示属性备份无效，不能恢复。'}
+    return $record
+}
+function Assert-PowerAttributeSnapshot($Actual,$Expected) {
+    if($Actual.Exists -ne $Expected.Exists -or $Actual.Kind -ne $Expected.Kind -or $Actual.Value -ne $Expected.Value){throw '显示属性已被其他程序改变，已停止覆盖。请刷新后重试。'}
+}
+function Enable-PowerSettingVisibility($Snapshot,[string]$DisplayName) {
+    $mutex=New-Object Threading.Mutex($false,'Local\PowerPlanManager.Visibility');$locked=$false
+    try{
+        try{$locked=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$locked=$true}
+        if(-not $locked){throw '另一个窗口正在修改显示属性，请稍后再试。'}
+        $now=Get-PowerAttributeState $Snapshot.GroupId $Snapshot.SettingId
+        Assert-PowerAttributeSnapshot $now $Snapshot
+        if($now.Kind -ne 'DWord' -or -not $now.Hidden){throw '该节点没有可解除的隐藏标志；属性缺失或类型异常时不会创建或改写。'}
+        $after=[uint32]([uint64]$now.Value -band [uint64]4294967294)
+        $record=[pscustomobject]@{Schema=1;Machine=(Get-VisibilityMachineId);GroupId=$now.GroupId;SettingId=$now.SettingId;Name=$DisplayName;Kind=$now.Kind;Before=$now.Value;After=$after;Phase='Prepared';Created=[DateTime]::UtcNow.ToString('o')}
+        $path=Join-Path $script:VisibilityBackupRoot ([guid]::NewGuid().ToString('N')+'.json')
+        Write-VisibilityRecord $record $path
+        Assert-PowerAttributeSnapshot (Get-PowerAttributeState $now.GroupId $now.SettingId) $now
+        try{
+            Set-PowerAttributeValue $now.GroupId $now.SettingId $after
+            $readback=Get-PowerAttributeState $now.GroupId $now.SettingId
+            if($readback.Kind -ne 'DWord' -or $readback.Value -ne $after){throw '写入后显示属性未得到确认，请刷新核对。'}
+            $record.Phase='Applied';Write-VisibilityRecord $record $path
+        }catch{throw ($_.Exception.Message+"`r`n属性备份："+$path)}
+        return $path
+    }finally{if($locked){$mutex.ReleaseMutex()};$mutex.Dispose()}
+}
+function Restore-PowerSettingVisibility([string]$Path) {
+    $mutex=New-Object Threading.Mutex($false,'Local\PowerPlanManager.Visibility');$locked=$false
+    try{
+        try{$locked=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$locked=$true}
+        if(-not $locked){throw '另一个窗口正在修改显示属性，请稍后再试。'}
+        $record=Read-VisibilityRecord $Path
+        if($record.Phase -eq 'Restored'){throw '这份属性备份已经恢复。'}
+        $now=Get-PowerAttributeState $record.GroupId $record.SettingId
+        if($now.Kind -ne 'DWord' -or $now.Value -ne $record.After){throw '当前属性与本程序修改后的状态不同，不能覆盖外部改动。'}
+        Set-PowerAttributeValue $record.GroupId $record.SettingId ([uint32]$record.Before)
+        $readback=Get-PowerAttributeState $record.GroupId $record.SettingId
+        if($readback.Kind -ne 'DWord' -or $readback.Value -ne $record.Before){throw '恢复后的属性未得到确认，请刷新核对。'}
+        $record.Phase='Restored';Write-VisibilityRecord $record $Path
+    }finally{if($locked){$mutex.ReleaseMutex()};$mutex.Dispose()}
+}
 
 function Get-PowerCfgEncoding {
     # .NET Framework Default is the system ANSI page; .NET (PS7) Default is UTF-8.
@@ -133,9 +235,10 @@ function ConvertFrom-PowerCfgNumber {
 }
 
 function Get-PowerSettings {
-    param([Parameter(Mandatory = $true)][psobject]$Plan)
+    param([Parameter(Mandatory = $true)][psobject]$Plan,[switch]$IncludeHidden)
     $id = Resolve-PowerPlanGuid $Plan.Id
-    $result = Invoke-PowerCfg -Arguments @('/query',$id)
+    $verb = if ($IncludeHidden) { '/qh' } else { '/query' }
+    $result = Invoke-PowerCfg -Arguments @($verb,$id)
     $settings = New-Object 'System.Collections.Generic.List[object]'
     $groupId = $null; $groupName = ''; $current = $null
     $guidPattern = '[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
@@ -352,6 +455,7 @@ function Get-ManagedSetting {
     $group=Resolve-PowerPlanGuid $GroupId
     $setting=Resolve-PowerPlanGuid $SettingId
     $matches=@(Get-PowerSettings -Plan $Plan | Where-Object { $_.GroupId -eq $group -and $_.SettingId -eq $setting })
+    if ($matches.Count -eq 0) { $matches=@(Get-PowerSettings -Plan $Plan -IncludeHidden | Where-Object { $_.GroupId -eq $group -and $_.SettingId -eq $setting }) }
     if ($matches.Count -ne 1) { throw '目标设置已不存在或无法唯一识别，请重新打开编辑窗口。' }
     return $matches[0]
 }

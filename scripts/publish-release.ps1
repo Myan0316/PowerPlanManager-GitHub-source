@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $projectDirectory = Split-Path -Parent $PSScriptRoot
 $outputDirectory = Join-Path $projectDirectory 'dist'
 $sourceDirectory = Join-Path $projectDirectory 'src'
-if (-not $ReleasePath) { $ReleasePath = Join-Path $outputDirectory '电源计划管理器_0.2.0.exe' }
+if (-not $ReleasePath) { $ReleasePath = Join-Path $outputDirectory '电源计划管理器_0.3.1.exe' }
 $releaseHash = (Get-FileHash -LiteralPath $ReleasePath -Algorithm SHA256).Hash
 $archiveDirectory = Join-Path $projectDirectory ('artifacts\release-archive\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
 $projectPrefix = [IO.Path]::GetFullPath($projectDirectory).TrimEnd('\') + '\'
@@ -36,6 +36,7 @@ function Publish-File {
 $canonical = Join-Path $outputDirectory '电源计划管理器.exe'
 Publish-File -Source $ReleasePath -Destination $canonical
 Publish-File -Source (Join-Path $sourceDirectory 'PowerPlan.Core.ps1') -Destination (Join-Path $outputDirectory 'PowerPlan.Core.ps1')
+Publish-File -Source (Join-Path $sourceDirectory 'PowerPlan.UI.ps1') -Destination (Join-Path $outputDirectory 'PowerPlan.UI.ps1')
 Publish-File -Source (Join-Path $sourceDirectory 'PowerPlanManager.ps1') -Destination (Join-Path $outputDirectory '电源计划管理器.ps1')
 [IO.File]::WriteAllText((Join-Path $outputDirectory '电源计划管理器.exe.sha256.txt'), ($releaseHash + "  电源计划管理器.exe`r`n"),(New-Object Text.UTF8Encoding($true)))
 if ((Get-FileHash -LiteralPath $canonical -Algorithm SHA256).Hash -ne $releaseHash) { throw 'Default EXE differs from versioned EXE.' }

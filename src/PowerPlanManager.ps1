@@ -2,14 +2,15 @@
 param([switch]$ListOnly, [switch]$SelfTest, [switch]$LoadOnly, [string]$StartupTestReport)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'PowerPlan.Core.ps1')
-$script:AppName = '电源计划管理器 0.2.0'
+. (Join-Path $PSScriptRoot 'PowerPlan.UI.ps1')
+$script:AppName = '电源计划管理器 0.3.1'
 $script:MainForm = $null
 $script:Plans = @()
 $script:ActivePlanId = $null
 $script:SelectedPlan = $null
 $script:UiBusy = $false
 $script:Refreshing = $false
-$script:PlanList = $null
+$script:PlanPicker = $null
 $script:DetailsBox = $null
 $script:StatusLabel = $null
 $script:ToolbarButtons = @()
@@ -39,16 +40,21 @@ function Confirm-Action {
     return ([System.Windows.Forms.MessageBox]::Show($Owner,$Message,$script:AppName,'YesNo','Question','Button2') -eq 'Yes')
 }
 function Get-SelectedPlan {
-    if ($null -eq $script:PlanList -or $script:PlanList.IsDisposed -or $script:PlanList.SelectedItems.Count -ne 1) { return $null }
-    return $script:PlanList.SelectedItems[0].Tag
+    if ($null -eq $script:PlanPicker -or $script:PlanPicker.IsDisposed) { return $null }
+    return $script:PlanPicker.SelectedItem
 }
 function Update-PlanButtons {
     if ($null -eq $script:MainForm -or $script:MainForm.IsDisposed) { return }
     $available = -not $script:UiBusy -and -not $script:Refreshing
     $plan = Get-SelectedPlan
+    $script:PlanPicker.Enabled = $available
+    $script:MainForm.Tag.CommonHost.Enabled = $available -and ($null -ne $plan)
     foreach ($button in $script:ToolbarButtons) { $button.Enabled = $available }
     foreach ($button in @($script:CreateButton,$script:EditButton,$script:RenameButton,$script:ExportButton)) { $button.Enabled = $available -and ($null -ne $plan) }
     $script:EnableButton.Enabled = $available -and ($null -ne $plan) -and ($plan.Id -ne $script:ActivePlanId)
+    $script:EnableButton.Text = if ($null -ne $plan -and $plan.Id -eq $script:ActivePlanId) { '正在使用' } else { '使用这个计划' }
+    $script:EnableButton.Name = if ($null -ne $plan -and $plan.Id -eq $script:ActivePlanId) { 'Badge' } else { 'Primary' }
+    Set-ControlPalette $script:EnableButton (Get-UiPalette)
     $script:DeleteButton.Enabled = $available -and ($null -ne $plan) -and ($plan.Id -ne $script:ActivePlanId) -and ($script:Plans.Count -gt 1)
 }
 function Invoke-UiAction {
@@ -70,6 +76,8 @@ function Update-PlanDetails {
     if ($script:Refreshing -or $null -eq $script:MainForm -or $script:MainForm.IsDisposed) { return }
     $plan = Get-SelectedPlan; $script:SelectedPlan = $plan
     Update-PlanButtons
+    Update-HomeSummary
+    $script:MainForm.Tag.BackupPlan.Text = if ($null -ne $plan) { '选中计划：' + $plan.Name } else { '请先在首页选择计划。' }
     if ($null -eq $plan) { $script:DetailsBox.Text = '请选择一个电源计划。'; return }
     try { $query = Invoke-PowerCfg -Arguments @('/query',$plan.Id); $script:DetailsBox.Text = $query.StdOut }
     catch { $script:DetailsBox.Text = '无法读取计划详情：' + $_.Exception.Message; throw }
@@ -84,24 +92,28 @@ function Refresh-PlanList {
         if ($freshActive -notin @($freshPlans.Id)) { throw '活动计划已发生变化，请重新刷新。' }
         $script:Plans = $freshPlans; $script:ActivePlanId = $freshActive
         if ($PreferredId -notin @($freshPlans.Id)) { $PreferredId = $freshActive }
-        $script:PlanList.BeginUpdate()
+        $script:PlanPicker.BeginUpdate()
         try {
-            $script:PlanList.Items.Clear()
+            $script:PlanPicker.Items.Clear()
             foreach ($plan in $freshPlans) {
-                $mark = if ($plan.Id -eq $freshActive) { '当前' } else { '' }
-                $row = New-Object System.Windows.Forms.ListViewItem($mark)
-                [void]$row.SubItems.Add($plan.Name); [void]$row.SubItems.Add($plan.Id)
-                $row.Tag = $plan; [void]$script:PlanList.Items.Add($row)
-                if ($plan.Id -eq $PreferredId) { $row.Selected = $true }
+                $display = $plan.Name
+                if (@($freshPlans | Where-Object Name -eq $plan.Name).Count -gt 1) { $display += ' [' + $plan.Id + ']' }
+                if ($plan.Id -eq $freshActive) { $display += ' · 使用中' }
+                $item = [pscustomobject]@{Id=$plan.Id;Name=$plan.Name;DisplayName=$display;IsActive=($plan.Id -eq $freshActive)}
+                $index = $script:PlanPicker.Items.Add($item)
+                if ($plan.Id -eq $PreferredId) { $script:PlanPicker.SelectedIndex = $index }
             }
-        } finally { $script:PlanList.EndUpdate() }
+        } finally { $script:PlanPicker.EndUpdate() }
     } catch {
         $script:Plans = @(); $script:ActivePlanId = $null; $script:SelectedPlan = $null
-        $script:PlanList.Items.Clear(); $script:DetailsBox.Text = '读取失败，请刷新后再操作。'
+        $script:PlanPicker.Items.Clear(); $script:DetailsBox.Text = '读取失败，请刷新后再操作。'
+        Update-HomeSummary
+        $script:MainForm.Tag.BackupPlan.Text = '计划状态未知，请刷新。'
         Set-Status ('读取失败：' + $_.Exception.Message); throw
     } finally { $script:Refreshing = $false; Update-PlanButtons }
     Update-PlanDetails
-    Set-Status ('已读取 {0} 个计划。当前：{1}' -f $script:Plans.Count,$script:ActivePlanId)
+    $activeName = @($script:Plans | Where-Object Id -eq $script:ActivePlanId)[0].Name
+    Set-Status ('已读取 {0} 个计划。正在使用：{1}' -f $script:Plans.Count,$activeName)
 }
 function Show-TextPrompt {
     param([string]$Title,[string]$Prompt,[string]$InitialValue = '')
@@ -120,6 +132,7 @@ function Show-TextPrompt {
         $cancel = New-Object System.Windows.Forms.Button
         $cancel.Text = '取消'; $cancel.DialogResult = 'Cancel'; $cancel.Location = New-Object System.Drawing.Point(386,95)
         $dialog.Controls.AddRange(@($label,$inputBox,$ok,$cancel)); $dialog.AcceptButton = $ok; $dialog.CancelButton = $cancel
+        Set-WindowPalette $dialog (Get-UiPalette)
         if ($dialog.ShowDialog($script:MainForm) -eq 'OK') { return $inputBox.Text.Trim() }
         return $null
     } finally { $dialog.Dispose() }
@@ -208,12 +221,13 @@ function Save-EditorDraft {
     else { $state.Drafts[$key] = [pscustomobject]@{Ac=$ac; Dc=$dc} }
 }
 function Set-EditorInput {
-    param($InputControl,$Setting,[string]$Value)
+    param($InputControl,$Setting,[string]$Value,[switch]$Raw)
     $InputControl.Items.Clear()
+    if ((Get-FriendlySetting $Setting).Time -and -not $Raw) { Set-FriendlyTimeInput $InputControl $Setting $Value; return }
     if ($null -ne $Setting.Choices -and $Setting.Choices.Count -gt 0) {
         $InputControl.DropDownStyle = 'DropDownList'; $InputControl.DisplayMember = 'Name'
         foreach ($choice in $Setting.Choices) {
-            $display = [pscustomobject]@{Value=$choice.Value; Name=('{0} = {1}' -f $choice.Value,$choice.Name)}
+            $display = [pscustomobject]@{Value=$choice.Value; Name=$choice.Name}
             $index = $InputControl.Items.Add($display)
             if ([string]$choice.Value -eq $Value) { $InputControl.SelectedIndex = $index }
         }
@@ -227,18 +241,22 @@ function Update-SettingEditor {
     try {
         $state.CurrentSetting = $null; $state.ApplyButton.Enabled = $false
         $state.AcInput.Enabled = $false; $state.DcInput.Enabled = $false
+        $state.InfoLabel.Text = '选择一项设置查看说明。'; $state.RangeLabel.Text = ''; $state.IdLabel.Text = ''; $state.RawToggle.Enabled = $false
         if ($state.Grid.SelectedRows.Count -ne 1 -or $null -eq $state.Grid.SelectedRows[0].Tag) { return }
         $setting = $state.Grid.SelectedRows[0].Tag; $state.CurrentSetting = $setting
         $ac = [string]$setting.AcValue; $dc = [string]$setting.DcValue; $key = Get-SettingKey $setting
         if ($state.Drafts.ContainsKey($key)) { $ac = $state.Drafts[$key].Ac; $dc = $state.Drafts[$key].Dc }
-        Set-EditorInput $state.AcInput $setting $ac; Set-EditorInput $state.DcInput $setting $dc
+        Set-EditorInput $state.AcInput $setting $ac -Raw:$state.RawInput; Set-EditorInput $state.DcInput $setting $dc -Raw:$state.RawInput
         $acProblem = if ($null -eq $setting.AcValue) { '无法读取接通电源的当前值。' } else { Test-PowerSettingValue $setting $setting.AcValue }
         $dcProblem = if ($null -eq $setting.DcValue) { '无法读取电池的当前值。' } else { Test-PowerSettingValue $setting $setting.DcValue }
         $canEdit = (-not $acProblem -and -not $dcProblem)
         $state.AcInput.Enabled = $canEdit; $state.DcInput.Enabled = $canEdit; $state.ApplyButton.Enabled = $canEdit
         if ($null -ne $setting.Choices -and $setting.Choices.Count -gt 0) { $state.RangeLabel.Text = (@($setting.Choices | ForEach-Object { '{0} = {1}' -f $_.Value,$_.Name }) -join '；') }
         else { $state.RangeLabel.Text = ('范围：{0} 至 {1}；步长：{2}；单位：{3}' -f $setting.Min,$setting.Max,$setting.Increment,$setting.Unit) }
-        $state.InfoLabel.Text = if ($canEdit) { '按系统定义校验。切换设置时保留未保存输入。' } else { '此项只读：' + ((@($acProblem,$dcProblem) | Where-Object { $_ } | Select-Object -Unique) -join '；') }
+        $friendly = Get-FriendlySetting $setting
+        $state.RawToggle.Enabled = $canEdit -and $friendly.Time
+        $state.InfoLabel.Text = if ($canEdit) { $friendly.Description + ' 切换分类或设置会保留草稿。' } else { '此项只读：' + ((@($acProblem,$dcProblem) | Where-Object { $_ } | Select-Object -Unique) -join '；') }
+        $state.IdLabel.Text = '系统设置：' + $setting.Name + "`r`n" + $setting.SettingId
     } finally { $state.Loading = $false }
 }
 function Apply-EditorSetting {
@@ -252,69 +270,15 @@ function Apply-EditorSetting {
     $acProblem = Test-PowerSettingValue $setting $ac; $dcProblem = Test-PowerSettingValue $setting $dc
     if ($acProblem -or $dcProblem) { throw ((@($acProblem,$dcProblem) | Where-Object { $_ }) -join "`r`n") }
     if ($ac -eq $setting.AcValue -and $dc -eq $setting.DcValue) { Show-InfoMessage '数值没有变化，无需写入。' $Dialog; return }
-    if (-not (Confirm-Action -Owner $Dialog -Message ("计划：{0}`r`n设置：{1}`r`n接通电源：{2} → {3}`r`n使用电池：{4} → {5}`r`n`r`n备份成功后应用，是否继续？" -f $state.Plan.Name,$setting.Name,$setting.AcValue,$ac,$setting.DcValue,$dc))) { return }
+    if (-not (Confirm-Action -Owner $Dialog -Message ("计划：{0}`r`n设置：{1}`r`n接通电源：{2} → {3}`r`n使用电池：{4} → {5}`r`n`r`n备份成功后应用，是否继续？" -f $state.Plan.Name,(Get-FriendlySetting $setting).Name,(Format-SettingValue $setting $setting.AcValue),(Format-SettingValue $setting $ac),(Format-SettingValue $setting $setting.DcValue),(Format-SettingValue $setting $dc)))) { return }
     $result = Set-ManagedPowerSetting -PlanId $state.Plan.Id -Setting $setting -AcValue $ac -DcValue $dc
     $setting.AcValue = $ac; $setting.DcValue = $dc; $state.Drafts.Remove((Get-SettingKey $setting))
-    $state.Grid.SelectedRows[0].Cells[2].Value = $ac; $state.Grid.SelectedRows[0].Cells[3].Value = $dc
+    $state.Grid.SelectedRows[0].Cells[2].Value = Format-SettingValue $setting $ac; $state.Grid.SelectedRows[0].Cells[3].Value = Format-SettingValue $setting $dc
     Show-InfoMessage -Owner $Dialog -Message ('已读回核对。备份：' + $result.BackupPath)
 }
 function Build-EditSettingsDialog {
     param($Plan,[object[]]$Settings)
-    Initialize-Desktop
-    $dialog = New-Object System.Windows.Forms.Form
-    $dialog.Text = '修改设置：' + $Plan.Name; $dialog.StartPosition = 'CenterParent'
-    $dialog.MinimumSize = New-Object System.Drawing.Size(900,560); $dialog.ClientSize = New-Object System.Drawing.Size(980,620)
-    # Keep every input and the Apply/Close buttons reachable at minimum size.
-    $dialog.MinimumSize = $dialog.Size
-    $dialog.Font = New-Object System.Drawing.Font('Microsoft YaHei UI',9)
-    $grid = New-Object System.Windows.Forms.DataGridView
-    $grid.Dock = 'Top'; $grid.Height = 390; $grid.ReadOnly = $true
-    $grid.AllowUserToAddRows = $false; $grid.AllowUserToDeleteRows = $false; $grid.MultiSelect = $false
-    $grid.SelectionMode = 'FullRowSelect'; $grid.AutoGenerateColumns = $false
-    foreach ($column in @(@('设置',230),@('分类',135),@('交流值',70),@('直流值',70),@('单位',65),@('GUID',255))) {
-        $c = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-        $c.HeaderText = $column[0]; $c.Width = $column[1]; $c.SortMode = 'NotSortable'; [void]$grid.Columns.Add($c)
-    }
-    foreach ($setting in $Settings) {
-        $rowIndex = $grid.Rows.Add([object[]]@($setting.Name,$setting.GroupName,$setting.AcValue,$setting.DcValue,$setting.Unit,$setting.SettingId))
-        $grid.Rows[$rowIndex].Tag = $setting
-    }
-    $info = New-Object System.Windows.Forms.Label
-    $info.Location = New-Object System.Drawing.Point(12,400); $info.Size = New-Object System.Drawing.Size(930,35)
-    $acLabel = New-Object System.Windows.Forms.Label
-    $acLabel.Text = '接通电源'; $acLabel.AutoSize = $true; $acLabel.Location = New-Object System.Drawing.Point(12,450)
-    $dcLabel = New-Object System.Windows.Forms.Label
-    $dcLabel.Text = '使用电池'; $dcLabel.AutoSize = $true; $dcLabel.Location = New-Object System.Drawing.Point(400,450)
-    $acInput = New-Object System.Windows.Forms.ComboBox
-    $acInput.Location = New-Object System.Drawing.Point(85,446); $acInput.Width = 290
-    $dcInput = New-Object System.Windows.Forms.ComboBox
-    $dcInput.Location = New-Object System.Drawing.Point(473,446); $dcInput.Width = 290
-    $range = New-Object System.Windows.Forms.Label
-    $range.Location = New-Object System.Drawing.Point(12,487); $range.Size = New-Object System.Drawing.Size(930,60)
-    $apply = New-Object System.Windows.Forms.Button
-    $apply.Text = '应用当前设置'; $apply.Width = 125; $apply.Location = New-Object System.Drawing.Point(820,564)
-    $close = New-Object System.Windows.Forms.Button
-    $close.Text = '关闭'; $close.Location = New-Object System.Drawing.Point(730,564); $close.DialogResult = 'Cancel'
-    $dialog.Controls.AddRange(@($grid,$info,$acLabel,$dcLabel,$acInput,$dcInput,$range,$apply,$close)); $dialog.CancelButton = $close
-    $dialog.Tag = [pscustomobject]@{Plan=$Plan; Grid=$grid; AcInput=$acInput; DcInput=$dcInput; ApplyButton=$apply; CloseButton=$close; InfoLabel=$info; RangeLabel=$range; Busy=$false; Loading=$false; Closing=$false; CurrentSetting=$null; Drafts=@{}}
-    $grid.Add_SelectionChanged({
-        param($sender,$eventArgs)
-        $owner = $sender.FindForm()
-        try { Update-SettingEditor -Dialog $owner }
-        catch { if ($null -ne $owner -and -not $owner.IsDisposed) { $owner.Tag.ApplyButton.Enabled = $false; Show-ErrorMessage $_.Exception.Message $owner } }
-    })
-    $apply.Add_Click({ param($sender,$eventArgs) $owner = $sender.FindForm(); Invoke-UiAction -Owner $owner -Action { Apply-EditorSetting -Dialog $owner } })
-    $dialog.Add_FormClosing({
-        param($sender,$eventArgs)
-        try {
-            Save-EditorDraft $sender
-            if ($sender.Tag.Drafts.Count -gt 0 -and -not (Confirm-Action -Owner $sender -Message '还有未应用的修改。放弃这些修改并关闭？')) { $eventArgs.Cancel = $true; return }
-            $sender.Tag.Closing = $true
-        } catch { $eventArgs.Cancel = $true; Show-ErrorMessage $_.Exception.Message $sender }
-    })
-    if ($grid.Rows.Count -gt 0) { $grid.Rows[0].Selected = $true }
-    Update-SettingEditor $dialog
-    return $dialog
+    return New-PowerEditor -Plan $Plan -Settings $Settings
 }
 function Show-EditSettingsDialog {
     $plan = Get-SelectedPlan; if ($null -eq $plan) { return }
@@ -324,64 +288,7 @@ function Show-EditSettingsDialog {
     try { [void]$dialog.ShowDialog($script:MainForm) } finally { $dialog.Tag.Closing = $true; $dialog.Dispose() }
     Refresh-PlanList -PreferredId $plan.Id
 }
-function Build-MainForm {
-    Initialize-Desktop
-    $script:Refreshing = $false; $script:UiBusy = $false
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = $script:AppName; $form.StartPosition = 'CenterScreen'
-    $form.MinimumSize = New-Object System.Drawing.Size(900,560); $form.ClientSize = New-Object System.Drawing.Size(1120,720)
-    $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI',9)
-    $form.Tag = [pscustomobject]@{Busy=$false}; $script:MainForm = $form
-    $toolbar = New-Object System.Windows.Forms.FlowLayoutPanel
-    $toolbar.Dock = 'Top'; $toolbar.Height = 50; $toolbar.AutoScroll = $true
-    $toolbar.Padding = New-Object System.Windows.Forms.Padding(8,8,8,4); $toolbar.WrapContents = $false
-    $form.Controls.Add($toolbar); $script:ToolbarButtons = @()
-    function Add-ToolbarButton {
-        param([string]$Text,[scriptblock]$Handler)
-        $button = New-Object System.Windows.Forms.Button
-        $button.Text = $Text; $button.AutoSize = $true; $button.Height = 28; $button.Tag = $Handler
-        $button.Add_Click({ param($sender,$eventArgs) Invoke-UiAction -Owner $sender.FindForm() -Action $sender.Tag })
-        $toolbar.Controls.Add($button); $script:ToolbarButtons += $button; return $button
-    }
-    $script:RefreshButton = Add-ToolbarButton '刷新' { Refresh-PlanList }
-    $script:EnableButton = Add-ToolbarButton '启用选中计划' { Enable-SelectedPlan }
-    $script:CreateButton = Add-ToolbarButton '创建副本' { Create-CopiedPlan }
-    $script:RenameButton = Add-ToolbarButton '重命名' { Rename-SelectedPlan }
-    $script:DeleteButton = Add-ToolbarButton '删除' { Delete-SelectedPlan }
-    $script:ExportButton = Add-ToolbarButton '导出备份' { Export-SelectedPlan }
-    $script:ImportButton = Add-ToolbarButton '导入计划' { Import-PlanFile }
-    $script:EditButton = Add-ToolbarButton '修改设置' { Show-EditSettingsDialog }
-    $script:RestoreButton = Add-ToolbarButton '恢复备份' { Restore-PlanBackup }
-    $script:ControlPanelButton = Add-ToolbarButton '系统电源选项' { Open-ControlPanel }
-    $split = New-Object System.Windows.Forms.SplitContainer
-    $split.Dock = 'Fill'; $split.Size = New-Object System.Drawing.Size($form.ClientSize.Width,($form.ClientSize.Height - $toolbar.Height))
-    $split.Panel1MinSize = 300; $split.Panel2MinSize = 450; $split.SplitterDistance = 380
-    $form.Controls.Add($split); $split.BringToFront()
-    $leftLabel = New-Object System.Windows.Forms.Label
-    $leftLabel.Text = '本机电源计划（动态读取）'; $leftLabel.Dock = 'Top'; $leftLabel.Height = 28; $leftLabel.Padding = New-Object System.Windows.Forms.Padding(8,8,0,0)
-    $split.Panel1.Controls.Add($leftLabel)
-    $list = New-Object System.Windows.Forms.ListView
-    $list.Dock = 'Fill'; $list.View = 'Details'; $list.FullRowSelect = $true; $list.GridLines = $true; $list.HideSelection = $false; $list.MultiSelect = $false
-    [void]$list.Columns.Add('状态',54); [void]$list.Columns.Add('计划名称',170); [void]$list.Columns.Add('GUID',235)
-    $list.Add_SelectedIndexChanged({ if (-not $script:Refreshing) { try { Update-PlanDetails } catch { Set-Status ('读取失败：' + $_.Exception.Message) } } })
-    $split.Panel1.Controls.Add($list); $list.BringToFront(); $script:PlanList = $list
-    $rightLabel = New-Object System.Windows.Forms.Label
-    $rightLabel.Text = '选中计划详情'; $rightLabel.Dock = 'Top'; $rightLabel.Height = 28; $rightLabel.Padding = New-Object System.Windows.Forms.Padding(8,8,0,0)
-    $split.Panel2.Controls.Add($rightLabel)
-    $details = New-Object System.Windows.Forms.TextBox
-    $details.Dock = 'Fill'; $details.Multiline = $true; $details.ReadOnly = $true; $details.ScrollBars = 'Both'; $details.WordWrap = $false
-    $details.Font = New-Object System.Drawing.Font('Consolas',9); $details.BackColor = [System.Drawing.SystemColors]::Window
-    $split.Panel2.Controls.Add($details); $details.BringToFront(); $script:DetailsBox = $details
-    $status = New-Object System.Windows.Forms.StatusStrip
-    $statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
-    $statusLabel.Spring = $true; [void]$status.Items.Add($statusLabel)
-    $version = New-Object System.Windows.Forms.ToolStripStatusLabel
-    $version.Text = '0.2.0'; [void]$status.Items.Add($version); $form.Controls.Add($status); $script:StatusLabel = $statusLabel
-    Update-PlanButtons
-    $form.Add_Shown({ param($sender,$eventArgs) Invoke-UiAction -Owner $sender -Action { Refresh-PlanList } })
-    $form.Add_FormClosing({ $script:Refreshing = $true })
-    return $form
-}
+function Build-MainForm { return New-PowerMainForm }
 function Start-Application {
     $form = Build-MainForm
     $startupTimer = $null
@@ -394,7 +301,7 @@ function Start-Application {
             param($sender,$eventArgs)
             $sender.Stop()
             try {
-                $report = [pscustomobject]@{ Title=$script:MainForm.Text; Visible=$script:MainForm.Visible; NativeVisible=[StartupWindowCheck]::IsWindowVisible($script:MainForm.Handle); ConsoleAttached=([StartupWindowCheck]::GetConsoleWindow() -ne [IntPtr]::Zero); Plans=$script:PlanList.Items.Count; Selected=$script:PlanList.SelectedItems.Count; Details=$script:DetailsBox.Text.Length; Status=$script:StatusLabel.Text }
+                $report = [pscustomobject]@{ Title=$script:MainForm.Text; Visible=$script:MainForm.Visible; NativeVisible=[StartupWindowCheck]::IsWindowVisible($script:MainForm.Handle); ConsoleAttached=([StartupWindowCheck]::GetConsoleWindow() -ne [IntPtr]::Zero); Plans=$script:PlanPicker.Items.Count; Selected=[int]($script:PlanPicker.SelectedIndex -ge 0); Details=$script:DetailsBox.Text.Length; Status=$script:StatusLabel.Text }
                 [IO.File]::WriteAllText($script:StartupReportPath,($report | ConvertTo-Json),(New-Object Text.UTF8Encoding($true)))
             } finally { $script:MainForm.Close() }
         })

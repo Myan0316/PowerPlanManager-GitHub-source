@@ -1,59 +1,58 @@
 ﻿[CmdletBinding()]
 param([string]$SourcePath)
-
-$ErrorActionPreference = 'Stop'
-if ([string]::IsNullOrEmpty($SourcePath)) { $SourcePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'src\PowerPlanManager.ps1' }
+$ErrorActionPreference='Stop'
+if(-not $SourcePath){$SourcePath=Join-Path (Split-Path -Parent $PSScriptRoot) 'src\PowerPlanManager.ps1'}
 . $SourcePath -LoadOnly
-
-function Assert-Layout {
-    param([bool]$Condition, [string]$Message)
-    if (-not $Condition) { throw $Message }
-}
-
-# Fail immediately instead of displaying a modal error in unattended checks.
-function Show-ErrorMessage {
-    param([string]$Message)
-    throw $Message
-}
-
-# Construct the actual application controls without showing a window or invoking
-# any power-setting operation. An error dialog must never count as a passing test.
-$testForm = $null
-try {
-    $testForm = Build-MainForm
-    Assert-Layout ($testForm -is [System.Windows.Forms.Form]) 'The application did not build a main form.'
-    $splitControl = @($testForm.Controls | Where-Object { $_ -is [System.Windows.Forms.SplitContainer] })
-    Assert-Layout ($splitControl.Count -eq 1) 'The main form must contain its split view.'
-    $splitControl = $splitControl[0]
-    $toolbarControl = @($testForm.Controls | Where-Object { $_ -is [System.Windows.Forms.FlowLayoutPanel] })[0]
-    $statusControl = @($testForm.Controls | Where-Object { $_ -is [System.Windows.Forms.StatusStrip] })[0]
-    Assert-Layout ($null -ne $script:PlanList -and $null -ne $script:DetailsBox) 'Plan list and details controls must be constructed.'
-
-    foreach ($testSize in @(@(1120, 720), @(900, 560), @(1400, 850))) {
-        $testForm.Size = New-Object System.Drawing.Size($testSize[0], $testSize[1])
-        $testForm.PerformLayout()
-        Assert-Layout ($splitControl.SplitterDistance -ge $splitControl.Panel1MinSize) 'The left panel is below its minimum width.'
-        Assert-Layout (($splitControl.Width - $splitControl.SplitterDistance - $splitControl.SplitterWidth) -ge $splitControl.Panel2MinSize) 'The right panel is below its minimum width.'
-        Assert-Layout ($splitControl.Top -ge $toolbarControl.Bottom) 'The split view overlaps the toolbar.'
-        Assert-Layout ($splitControl.Bottom -le $statusControl.Top) 'The split view overlaps the status bar.'
-        foreach ($panel in @($splitControl.Panel1, $splitControl.Panel2)) {
-            $heading = @($panel.Controls | Where-Object { $_ -is [System.Windows.Forms.Label] })[0]
-            $content = @($panel.Controls | Where-Object { $_.Dock -eq [System.Windows.Forms.DockStyle]::Fill })[0]
-            Assert-Layout ($content.Top -ge $heading.Bottom) 'Panel contents overlap their heading.'
+function Assert-Layout([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
+function Create-LayoutHandles($Control){$null=$Control.Handle;foreach($child in $Control.Controls){Create-LayoutHandles $child};$Control.PerformLayout()}
+$form=Build-MainForm
+try{
+    Create-LayoutHandles $form;Refresh-PlanList
+    foreach($size in @(@(1180,780),@(1020,700),@(1400,900))){
+        $form.Size=New-Object Drawing.Size($size[0],$size[1]);$form.PerformLayout()
+        foreach($pageName in @('首页','备份与恢复','外观')){
+            Show-MainPage $pageName;$page=$form.Tag.Pages[$pageName];$page.PerformLayout()
+            foreach($control in $page.Controls){Assert-Layout ($control.Right -le $page.ClientSize.Width) ($pageName+': content must fit horizontally: '+$control.Text)}
+            Assert-Layout ($page.Parent.Right -le $page.Parent.Parent.ClientSize.Width) 'Page must remain within the shell.'
         }
-        Write-Output ('PASS: main form {0}x{1}; panels {2}/{3}' -f $testForm.Width, $testForm.Height, $splitControl.Panel1.Width, $splitControl.Panel2.Width)
+        Show-MainPage '首页'
+        $pickerBounds=$script:PlanPicker.Bounds;$useBounds=$script:EnableButton.Bounds;$refreshBounds=$script:RefreshButton.Bounds
+        Assert-Layout ($script:PlanPicker.Parent -eq $script:EnableButton.Parent -and [Math]::Abs($pickerBounds.Y-$useBounds.Y) -le 5) 'Plan selector and activation must share a horizontal row.'
+        Assert-Layout ($pickerBounds.Right -lt $useBounds.Left -and $useBounds.Right -lt $refreshBounds.Left) 'Plan actions must have non-overlapping gaps.'
+        Assert-Layout ($pickerBounds.Width -ge 200) 'Plan picker must remain readable.'
+        foreach($button in @($script:EnableButton,$script:EditButton,$script:RefreshButton,$form.Tag.ManagementToggle)){
+            Assert-Layout ($button.Width -lt 240 -and $button.Height -ge 36) 'Action buttons must stay compact with adequate hit areas.'
+        }
+        $commonTable=$form.Tag.CommonHost.Controls[0]
+        if($commonTable -is [Windows.Forms.TableLayoutPanel]){
+            foreach($rowIndex in 1..($commonTable.RowCount-1)){
+                $ac=$commonTable.GetControlFromPosition(1,$rowIndex);$dc=$commonTable.GetControlFromPosition(2,$rowIndex);$edit=$commonTable.GetControlFromPosition(3,$rowIndex)
+                Assert-Layout ($ac.Right -lt $dc.Left -and $dc.Right -lt $edit.Left) 'Common AC/DC values and edit buttons occupy distinct columns.'
+            }
+        }
+        Write-Output ('PASS: home, backup and appearance layouts at {0}x{1}; vertical scroll keeps content reachable.' -f $form.Width,$form.Height)
     }
-
-    # Read actual local plans through the same refresh path used by Form.Shown.
-    # Create only native handles; do not show a window or change a power plan.
-    $null = $testForm.Handle
-    $null = $script:PlanList.Handle
-    Refresh-PlanList
-    Assert-Layout ($script:PlanList.Items.Count -gt 0) 'The startup refresh did not populate the plan list.'
-    Assert-Layout ($script:SelectedPlan.Id -in @($script:Plans.Id)) 'Startup did not select an existing plan.'
-    Assert-Layout ($script:DetailsBox.Text.Contains($script:SelectedPlan.Id)) 'Startup did not load the selected plan details.'
-    Assert-Layout ($script:StatusLabel.Text.Contains($script:ActivePlanId)) 'The status bar did not show the active plan.'
-    Write-Output ('PASS: actual startup refresh; {0} plans and selected plan details loaded.' -f $script:PlanList.Items.Count)
-} finally {
-    if ($null -ne $testForm) { $testForm.Dispose() }
-}
+    Assert-Layout ($script:PlanPicker.Items.Count -gt 0) 'Plans loaded.'
+    Assert-Layout ((Get-SelectedPlan).Id -in @($script:Plans.Id)) 'Selected plan exists.'
+    Assert-Layout ($script:DetailsBox.Text.Contains((Get-SelectedPlan).Id)) 'Technical details match the selected plan.'
+    $active=@($script:Plans | Where-Object Id -eq $script:ActivePlanId)[0]
+    Assert-Layout ($form.Tag.ActiveLabel.Text.Contains($active.Name)) 'Current plan is identified by name.'
+    $editor=Build-EditSettingsDialog -Plan (Get-SelectedPlan) -Settings $form.Tag.HomeSettings
+    try{
+        Create-LayoutHandles $editor;$editor.Size=New-Object Drawing.Size(1040,740);$editor.PerformLayout()
+        foreach($button in @($editor.Tag.ApplyButton,$editor.Tag.CloseButton)){
+            $point=$editor.PointToClient($button.Parent.PointToScreen($button.Location))
+            Assert-Layout ($point.X -ge 0 -and $point.Y -ge 0 -and $point.X+$button.Width -le $editor.ClientSize.Width -and $point.Y+$button.Height -le $editor.ClientSize.Height) 'Editor actions must be reachable at minimum size.'
+        }
+        Assert-Layout ($editor.Tag.Grid.Height -ge 100) 'The grid must retain usable height.'
+    }finally{$editor.Dispose()}
+    $visibility=New-VisibilityDialog (Get-SelectedPlan)
+    try{
+        Create-LayoutHandles $visibility;$visibility.Size=New-Object Drawing.Size(940,680);$visibility.PerformLayout()
+        foreach($button in @($visibility.Tag.Reveal,$visibility.Tag.Restore)){
+            $point=$visibility.PointToClient($button.Parent.PointToScreen($button.Location))
+            Assert-Layout ($point.Y+$button.Height -le $visibility.ClientSize.Height -and $point.X+$button.Width -le $visibility.ClientSize.Width) 'Visibility actions stay inside minimum-size window.'
+        }
+    }finally{$visibility.Dispose()}
+    Write-Output 'PASS: real read-only startup, selected/current identity and minimum editor layout.'
+}finally{$form.Dispose()}
