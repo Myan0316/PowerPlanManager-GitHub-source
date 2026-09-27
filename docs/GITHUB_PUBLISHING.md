@@ -33,7 +33,7 @@ git commit -m "Prepare Power Plan Manager source project"
 
 在 Windows PowerShell 5.1 下运行 `scripts/build.ps1`，完成验证后，为相应版本创建 GitHub Release。附件选择 `dist/` 中带版本的 EXE、对应 SHA-256，以及需要时重新生成的源码 ZIP。不要上传本地归档或测试备份。
 
-更新版本时同步程序标题、启动器、构建和校验脚本中的版本，以及使用说明和报告。当前源码/本地构建为 0.3.1，本轮未更新 GitHub Release，上次远程核对版本为 0.2.0；不能直接改文件名冒充新版本。
+更新版本时同步程序标题、启动器、构建和校验脚本中的版本，以及使用说明和报告。当前版本为 0.3.1，发布范围及验证边界见 [进度汇总](PROGRESS_0.3.1.md) 和 [发布说明](RELEASE_NOTES_v0.3.1.md)；实际发布状态以 GitHub Releases 为准。不能直接改文件名冒充新版本。
 
 ## 许可证
 

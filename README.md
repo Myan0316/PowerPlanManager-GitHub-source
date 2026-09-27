@@ -2,11 +2,13 @@
 
 一个 Windows 中文桌面工具：自动发现本机电源计划，切换计划，创建副本、重命名、删除，以及备份和编辑 AC/DC 设置。换电脑后重新读取本机计划，无需修改 GUID。
 
-当前源码及本地构建版本：**0.3.1**。采用简洁首页、分类高级设置和可保存的外观配色；新增隐藏参数浏览、编辑和 Windows 显示属性管理。实现采用 Windows PowerShell 5.1、WinForms 和系统电源接口；C# 启动器负责让便携 EXE 启动时不附带控制台窗口。本轮只生成本地版本，未更新 GitHub Release；上次核对的远程版本为 0.2.0。
+当前版本：**0.3.1**。采用简洁首页、分类高级设置和可保存的外观配色；新增隐藏参数浏览、编辑和 Windows 显示属性管理。实现采用 Windows PowerShell 5.1、WinForms 和系统电源接口；C# 启动器负责让便携 EXE 启动时不附带控制台窗口。当前能力、测试边界和未完成项见 [进度汇总](docs/PROGRESS_0.3.1.md)，本版更新见 [发布说明](docs/RELEASE_NOTES_v0.3.1.md)。下载以 [GitHub Releases](https://github.com/Myan0316/PowerPlanManager-GitHub-source/releases) 为准。
 
 版本、进度与历史核对见 [开发日志](docs/DEVELOPMENT_LOG.md)（2026-09-27 更新，含已发布状态、历史索引和本次回归结果）。根目录 `SOURCE_MANIFEST.sha256` 保留为原发布源码基线，不随开发中的文档修改更新。
 
 0.3.1 的改动、验证和限制见 [界面及隐藏项更新报告](docs/TEST_REPORT_0.3.1.md)。
+
+安全检查见 [安全与健壮性测试方案](docs/SECURITY_TEST_PLAN.md) 和 [执行台账](docs/SECURITY_TEST_EXECUTION.md)：包含 100 项测试设计及优先复现线索，当前为文档准备阶段，不代表安全测试已通过。
 
 ## 使用
 
