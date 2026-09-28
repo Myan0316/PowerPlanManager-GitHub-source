@@ -255,7 +255,7 @@ function Update-SettingEditor {
     try {
         $state.CurrentSetting = $null; $state.ApplyButton.Enabled = $false
         $state.AcInput.Enabled = $false; $state.DcInput.Enabled = $false
-        $state.InfoLabel.Text = '选择一项设置查看说明。'; $state.RangeLabel.Text = ''; $state.IdLabel.Text = ''; $state.RawToggle.Enabled = $false
+        $state.InfoLabel.Text = '选择一项设置查看说明。'; $state.RangeLabel.Text = ''; $state.IdLabel.Text = ''; $state.RawToggle.Visible = $false
         if ($state.Grid.SelectedRows.Count -ne 1 -or $null -eq $state.Grid.SelectedRows[0].Tag) { return }
         $setting = $state.Grid.SelectedRows[0].Tag; $state.CurrentSetting = $setting
         $ac = [string]$setting.AcValue; $dc = [string]$setting.DcValue; $key = Get-SettingKey $setting
@@ -268,7 +268,7 @@ function Update-SettingEditor {
         if ($null -ne $setting.Choices -and $setting.Choices.Count -gt 0) { $state.RangeLabel.Text = (@($setting.Choices | ForEach-Object { '{0} = {1}' -f $_.Value,$_.Name }) -join '；') }
         else { $state.RangeLabel.Text = ('范围：{0} 至 {1}；步长：{2}；单位：{3}' -f $setting.Min,$setting.Max,$setting.Increment,$setting.Unit) }
         $friendly = Get-FriendlySetting $setting
-        $state.RawToggle.Enabled = $canEdit -and $friendly.Time
+        $state.RawToggle.Visible = $canEdit -and $friendly.Time
         $state.InfoLabel.Text = if ($canEdit) { $friendly.Description + ' 切换分类或设置会保留草稿。' } else { '此项只读：' + ((@($acProblem,$dcProblem) | Where-Object { $_ } | Select-Object -Unique) -join '；') }
         $state.IdLabel.Text = '系统设置：' + $setting.Name + "`r`n" + $setting.SettingId
     } finally { $state.Loading = $false }
