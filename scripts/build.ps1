@@ -11,7 +11,7 @@ $launcher = Join-Path $work 'PowerPlanLauncher.exe'
 $stage = Join-Path $work 'iexpress-stage'
 $sedPath = Join-Path $work 'PowerPlanManager.sed'
 $temporaryExe = Join-Path $work 'PowerPlanManager.exe'
-$finalExe = Join-Path $outputs '电源计划管理器_0.3.1.exe'
+$finalExe = Join-Path $outputs '电源计划管理器_0.3.2.exe'
 $core = Join-Path $sourceDirectory 'PowerPlan.Core.ps1'
 . $core
 
@@ -82,8 +82,8 @@ if (-not (Test-Path -LiteralPath $temporaryExe -PathType Leaf)) { throw "IExpres
 
 [System.IO.File]::Copy([string]$temporaryExe, [string]$finalExe, $true)
 $hash = (Get-FileHash -LiteralPath $finalExe -Algorithm SHA256).Hash
-$hashPath = Join-Path $outputs '电源计划管理器_0.3.1.exe.sha256.txt'
-[System.IO.File]::WriteAllText($hashPath, "$hash  电源计划管理器_0.3.1.exe`r`n", [System.Text.Encoding]::UTF8)
+$hashPath = Join-Path $outputs '电源计划管理器_0.3.2.exe.sha256.txt'
+[System.IO.File]::WriteAllText($hashPath, "$hash  电源计划管理器_0.3.2.exe`r`n", [System.Text.Encoding]::UTF8)
 
 # Verify the actual embedded files without launching the GUI. Tests of the
 # extracted payload prevent a stale/missing dependency from reaching release.
@@ -116,7 +116,7 @@ if (-not $startupProcess.WaitForExit(30000)) { $startupProcess.Kill(); throw 'Pa
 if ($startupProcess.ExitCode -ne 0) { throw 'Packaged startup returned an error.' }
 if (-not [IO.File]::Exists($startupReport)) { throw 'Packaged startup produced no report.' }
 $startupResult = Get-Content -LiteralPath $startupReport -Raw -Encoding UTF8 | ConvertFrom-Json
-if (-not $startupResult.Visible -or -not $startupResult.NativeVisible -or $startupResult.Title -ne '电源计划管理器 0.3.1' -or $startupResult.Plans -lt 1 -or $startupResult.Selected -ne 1 -or $startupResult.Details -lt 100) { throw 'Packaged main window was hidden or failed to load real plan data.' }
+if (-not $startupResult.Visible -or -not $startupResult.NativeVisible -or $startupResult.Title -ne '电源计划管理器 0.3.2' -or $startupResult.Plans -lt 1 -or $startupResult.Selected -ne 1 -or $startupResult.Details -lt 100) { throw 'Packaged main window was hidden or failed to load real plan data.' }
 if ($startupResult.ConsoleAttached -ne $false) { throw 'The packaged application unexpectedly attached to a console.' }
 if (Get-Process -Name PowerPlanLauncher -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*\Temp\IXP*.TMP\PowerPlanLauncher.exe' }) { throw 'Startup test left a launcher running.' }
 Write-Output ('PASS: actual EXE startup created a visible main window with loaded plans; report=' + $startupReport)

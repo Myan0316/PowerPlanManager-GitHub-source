@@ -2,7 +2,7 @@
 
 一个 Windows 中文桌面工具：自动发现本机电源计划，切换计划，创建副本、重命名、删除，以及备份和编辑 AC/DC 设置。换电脑后重新读取本机计划，无需修改 GUID。
 
-当前版本：**0.3.1**。采用简洁首页、分类高级设置和可保存的外观配色；新增隐藏参数浏览、编辑和 Windows 显示属性管理。实现采用 Windows PowerShell 5.1、WinForms 和系统电源接口；C# 启动器负责让便携 EXE 启动时不附带控制台窗口。当前能力、测试边界和未完成项见 [进度汇总](docs/PROGRESS_0.3.1.md)，本版更新见 [发布说明](docs/RELEASE_NOTES_v0.3.1.md)。下载以 [GitHub Releases](https://github.com/Myan0316/PowerPlanManager-GitHub-source/releases) 为准。
+当前版本：**0.3.2**。恢复切换计划时的防闪烁修复，保留不适用输入选项的隐藏修复，并统一源码与下载包的发布验证。采用简洁首页、分类高级设置和可保存的外观配色，支持隐藏参数浏览、编辑和 Windows 显示属性管理。实现采用 Windows PowerShell 5.1、WinForms 和系统电源接口；C# 启动器负责让便携 EXE 启动时不附带控制台窗口。本版更新和验证见 [0.3.2 发布说明](docs/RELEASE_NOTES_v0.3.2.md)，此前功能范围见 [进度汇总](docs/PROGRESS_0.3.1.md)。下载以 [GitHub 最新版](https://github.com/Myan0316/PowerPlanManager-GitHub-source/releases/latest) 为准。
 
 版本、进度与历史核对见 [开发日志](docs/DEVELOPMENT_LOG.md)（2026-09-27 更新，含已发布状态、历史索引和本次回归结果）。根目录 `SOURCE_MANIFEST.sha256` 保留为原发布源码基线，不随开发中的文档修改更新。
 
@@ -74,4 +74,15 @@ artifacts/    构建和测试中间文件（Git 忽略）
 
 ## 上传 GitHub
 
-首次发布的文件选择、旧 Git 历史处理和 Releases 附件清单见 [上传与发布说明](docs/GITHUB_PUBLISHING.md)。仓库尚未选择开源许可证；上传到公开仓库不等于已经授予开源许可。
+首次发布的文件选择、旧 Git 历史处理和 Releases 附件清单见 [上传与发布说明](docs/GITHUB_PUBLISHING.md)。
+
+提交并推送到 `origin/main` 后，运行 `powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\scripts\publish-github.ps1`：从当前提交重新构建、导出源码，上传草稿并下载核对全部附件，再发布为最新版。需要 Git 已登录且具有该仓库的发布权限。`publish-release.ps1` 仅更新本地默认入口；单独推送源码不会更新 GitHub Release 附件。
+
+## 许可
+
+个人、公司和其他组织均可免费使用、学习、修改和免费分享，包括公司内部使用。仅有两项条件：
+
+1. **禁止收费销售**本软件、源码或修改版，包括付费下载、付费解锁及实质上对本软件收费的捆绑销售。
+2. **对外发布或分发修改版时，须同时公开完整的对应源码**，让接收者可以免费获取、检查和修改。仅自用或组织内部使用的修改，无需向公众公开。
+
+完整条款见 [LICENSE](LICENSE)，也适用于本项目此前已发布且由著作权人有权授权的版本。不额外要求署名或向原项目提交修改。项目采用自定义的源码公开许可，含收费销售限制，不宣称采用 MIT、GPL 或标准开源许可证。

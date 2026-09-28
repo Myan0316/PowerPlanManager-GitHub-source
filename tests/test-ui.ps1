@@ -54,6 +54,8 @@ try{
     Check ((Format-SettingValue $other 0) -eq '0 秒') 'Unknown zero semantics are not guessed.'
     $editor=Build-EditSettingsDialog -Plan (Get-SelectedPlan) -Settings @($time,$other)
     Handles $editor;$state=$editor.Tag
+    $editor.Show();[Windows.Forms.Application]::DoEvents()
+    Check ($state.RawToggle.Visible -and $state.RawToggle.Enabled) 'Known editable time settings show the raw input toggle.'
     Check ((Read-EditorInput $state.AcInput) -eq '123') 'Non-preset current seconds survive the friendly dropdown.'
     $state.AcInput.SelectedIndex=@($state.AcInput.Items.Value).IndexOf([uint64]600)
     $state.Categories.SelectedIndex=2;$state.Categories.SelectedIndex=1
@@ -70,8 +72,13 @@ try{
     Check ($script:UiWrites -eq 1 -and $time.AcValue -eq 600) 'Save routes once through the protected service.'
     $state.Categories.SelectedIndex=2
     Check ($state.Grid.Rows.Count -eq 1 -and $state.CurrentSetting.SettingId -eq $other.SettingId) 'Category selection identifies the correct setting.'
+    Check (-not $state.RawToggle.Visible) 'Settings without friendly time presets hide the inapplicable toggle.'
     $state.AcInput.Text='7';Save-EditorDraft $editor
     $script:Appearance.Mode='Dark';Set-WindowPalette $editor (Get-UiPalette)
     Check ($state.AcInput.Text -eq '7' -and $state.Drafts.Count -gt 0) 'Theme change keeps unsaved input.'
+    $state.Categories.SelectedIndex=1
+    Check ($state.RawToggle.Visible) 'Returning to a time setting restores the toggle.'
+    $state.Grid.ClearSelection()
+    Check (-not $state.RawToggle.Visible) 'Clearing selection hides the toggle.'
     Write-Output ('PASS: {0} UI checks; theme persistence/fallback/system changes, contrast, time conversion and category drafts; writes mocked.' -f $script:UiAssertions)
 }finally{if($null -ne $editor){$editor.Dispose()};$form.Dispose()}

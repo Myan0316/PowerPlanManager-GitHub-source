@@ -54,14 +54,14 @@ internal static class PowerPlanLauncher
                 {
                     if (error.Length > 4000) error = error.Substring(0, 4000);
                     MessageBox.Show("Power Plan Manager could not finish.\r\n" + error,
-                        "Power Plan Manager 0.3.1 - startup error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        "Power Plan Manager 0.3.2 - startup error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 return process.ExitCode;
             }
         }
         catch (Exception error)
         {
-            MessageBox.Show(error.Message, "Power Plan Manager 0.3.1 - launcher error",
+            MessageBox.Show(error.Message, "Power Plan Manager 0.3.2 - launcher error",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }

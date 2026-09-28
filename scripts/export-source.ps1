@@ -10,7 +10,7 @@ $stage = Join-Path $artifactRoot ('source-export-' + [guid]::NewGuid().ToString(
 
 # Explicit public source roots; do not include Git history or local evidence.
 $files = New-Object 'System.Collections.Generic.List[string]'
-foreach ($name in @('README.md','.gitignore','.gitattributes','.editorconfig')) { $files.Add($name) }
+foreach ($name in @('README.md','LICENSE','.gitignore','.gitattributes','.editorconfig')) { $files.Add($name) }
 foreach ($directory in @('src','scripts','tests','docs')) {
     $entries = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot $directory) -Recurse -Force)
     if (@($entries | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) { throw 'Source export does not follow reparse points.' }

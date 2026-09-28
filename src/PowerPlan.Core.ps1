@@ -234,15 +234,12 @@ function ConvertFrom-PowerCfgNumber {
     return $null
 }
 
-function Get-PowerSettings {
-    param([Parameter(Mandatory = $true)][psobject]$Plan,[switch]$IncludeHidden)
-    $id = Resolve-PowerPlanGuid $Plan.Id
-    $verb = if ($IncludeHidden) { '/qh' } else { '/query' }
-    $result = Invoke-PowerCfg -Arguments @($verb,$id)
+function ConvertFrom-PowerCfgSettings {
+    param([Parameter(Mandatory = $true)][string]$Output)
     $settings = New-Object 'System.Collections.Generic.List[object]'
     $groupId = $null; $groupName = ''; $current = $null
     $guidPattern = '[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
-    foreach ($line in ($result.StdOut -split '\r?\n')) {
+    foreach ($line in ($Output -split '\r?\n')) {
         $groupMatch = [regex]::Match($line,"(?i)^\s*(?:子组|Subgroup)\s+GUID\s*:\s*(?<id>$guidPattern)\s*(?:\((?<name>.*)\))?\s*$")
         if ($groupMatch.Success) {
             if ($null -ne $current) { $settings.Add($current); $current=$null }
@@ -311,6 +308,29 @@ function Get-PowerSettings {
         $setting.Choices = $setting.Choices.ToArray()
     }
     return $settings.ToArray()
+}
+
+function Get-PowerPlanSnapshot {
+    param([Parameter(Mandatory = $true)][psobject]$Plan,[switch]$IncludeHidden)
+    $id = Resolve-PowerPlanGuid $Plan.Id
+    $verb = if ($IncludeHidden) { '/qh' } else { '/query' }
+    $result = Invoke-PowerCfg -Arguments @($verb,$id)
+    $settings=@();$settingsError=''
+    try { $settings=@(ConvertFrom-PowerCfgSettings -Output $result.StdOut) }
+    catch { $settingsError=$_.Exception.Message }
+    return [pscustomobject]@{
+        PlanId=$id
+        RawOutput=$result.StdOut
+        Settings=$settings
+        SettingsError=$settingsError
+    }
+}
+
+function Get-PowerSettings {
+    param([Parameter(Mandatory = $true)][psobject]$Plan,[switch]$IncludeHidden)
+    $snapshot = Get-PowerPlanSnapshot -Plan $Plan -IncludeHidden:$IncludeHidden
+    if ($snapshot.SettingsError) { throw $snapshot.SettingsError }
+    return @($snapshot.Settings)
 }
 
 function Test-PowerSettingValue {

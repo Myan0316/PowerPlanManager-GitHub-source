@@ -3,7 +3,7 @@ param([switch]$ListOnly, [switch]$SelfTest, [switch]$LoadOnly, [string]$StartupT
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'PowerPlan.Core.ps1')
 . (Join-Path $PSScriptRoot 'PowerPlan.UI.ps1')
-$script:AppName = '电源计划管理器 0.3.1'
+$script:AppName = '电源计划管理器 0.3.2'
 $script:MainForm = $null
 $script:Plans = @()
 $script:ActivePlanId = $null
@@ -49,13 +49,21 @@ function Update-PlanButtons {
     $plan = Get-SelectedPlan
     $script:PlanPicker.Enabled = $available
     $script:MainForm.Tag.CommonHost.Enabled = $available -and ($null -ne $plan)
-    foreach ($button in $script:ToolbarButtons) { $button.Enabled = $available }
-    foreach ($button in @($script:CreateButton,$script:EditButton,$script:RenameButton,$script:ExportButton)) { $button.Enabled = $available -and ($null -ne $plan) }
-    $script:EnableButton.Enabled = $available -and ($null -ne $plan) -and ($plan.Id -ne $script:ActivePlanId)
-    $script:EnableButton.Text = if ($null -ne $plan -and $plan.Id -eq $script:ActivePlanId) { '正在使用' } else { '使用这个计划' }
-    $script:EnableButton.Name = if ($null -ne $plan -and $plan.Id -eq $script:ActivePlanId) { 'Badge' } else { 'Primary' }
-    Set-ControlPalette $script:EnableButton (Get-UiPalette)
-    $script:DeleteButton.Enabled = $available -and ($null -ne $plan) -and ($plan.Id -ne $script:ActivePlanId) -and ($script:Plans.Count -gt 1)
+    foreach ($button in $script:ToolbarButtons) {
+        $enabled = $available
+        if ($button -in @($script:CreateButton,$script:EditButton,$script:RenameButton,$script:ExportButton)) { $enabled = $available -and ($null -ne $plan) }
+        if ($button -eq $script:EnableButton) { $enabled = $available -and ($null -ne $plan) -and ($plan.Id -ne $script:ActivePlanId) }
+        if ($button -eq $script:DeleteButton) { $enabled = $available -and ($null -ne $plan) -and ($plan.Id -ne $script:ActivePlanId) -and ($script:Plans.Count -gt 1) }
+        if ($button.Enabled -ne $enabled) { $button.Enabled = $enabled }
+    }
+    $activeSelection = $null -ne $plan -and $plan.Id -eq $script:ActivePlanId
+    $buttonText = if ($activeSelection) { '正在使用' } else { '使用这个计划' }
+    $buttonName = if ($activeSelection) { 'Badge' } else { 'Primary' }
+    if ($script:EnableButton.Text -ne $buttonText) { $script:EnableButton.Text = $buttonText }
+    if ($script:EnableButton.Name -ne $buttonName) {
+        $script:EnableButton.Name = $buttonName
+        Set-ControlPalette $script:EnableButton (Get-UiPalette)
+    }
 }
 function Invoke-UiAction {
     param([scriptblock]$Action, $Owner = $null)
@@ -76,11 +84,17 @@ function Update-PlanDetails {
     if ($script:Refreshing -or $null -eq $script:MainForm -or $script:MainForm.IsDisposed) { return }
     $plan = Get-SelectedPlan; $script:SelectedPlan = $plan
     Update-PlanButtons
-    Update-HomeSummary
     $script:MainForm.Tag.BackupPlan.Text = if ($null -ne $plan) { '选中计划：' + $plan.Name } else { '请先在首页选择计划。' }
-    if ($null -eq $plan) { $script:DetailsBox.Text = '请选择一个电源计划。'; return }
-    try { $query = Invoke-PowerCfg -Arguments @('/query',$plan.Id); $script:DetailsBox.Text = $query.StdOut }
-    catch { $script:DetailsBox.Text = '无法读取计划详情：' + $_.Exception.Message; throw }
+    if ($null -eq $plan) { Update-HomeSummary -Settings @(); $script:DetailsBox.Text = '请选择一个电源计划。'; return }
+    try {
+        $snapshot=Get-PowerPlanSnapshot -Plan $plan
+        Update-HomeSummary -Settings $snapshot.Settings -SettingsError $snapshot.SettingsError
+        $script:DetailsBox.Text=$snapshot.RawOutput
+    } catch {
+        Update-HomeSummary -Settings @() -SettingsError $_.Exception.Message
+        $script:DetailsBox.Text = '无法读取计划详情：' + $_.Exception.Message
+        throw
+    }
 }
 function Refresh-PlanList {
     param([string]$PreferredId)
