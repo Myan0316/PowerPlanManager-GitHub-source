@@ -11,7 +11,6 @@ $script:GuiTestInfo = New-Object System.Collections.Generic.List[string]
 $script:GuiTestUnhandled = New-Object System.Collections.Generic.List[string]
 $script:GuiTestCalls = New-Object System.Collections.Generic.List[string]
 $script:GuiTestFailure = ''
-$script:GuiTestQueryCount = 0
 $script:GuiTestPrompt = 'GUI regression name & ! % (copy)'
 $script:GuiTestConfirm = $true
 $script:GuiTestImportPath = 'C:\GUI test fixtures\import.pow'
@@ -141,14 +140,7 @@ try {
         param([string[]]$Arguments, [switch]$AllowFailure, [int]$TimeoutMilliseconds, [int]$TimeoutSeconds)
         if ($Arguments[0] -notin @('/query','/qh')) { throw ('Unexpected real-tool request in GUI test: ' + ($Arguments -join ' ')) }
         if ($script:GuiTestFailure -eq 'details') { throw 'Injected details failure' }
-        $script:GuiTestQueryCount++
         return [pscustomobject]@{ ExitCode=0; StdOut=('Details for ' + $Arguments[1]); StdErr='' }
-    }
-    function Get-PowerPlanSnapshot {
-        param($Plan,[switch]$IncludeHidden)
-        $result=Invoke-PowerCfg -Arguments @('/query',$Plan.Id)
-        $parseError=if($script:GuiTestFailure -eq 'parse'){'Injected parse failure'}else{''}
-        return [pscustomobject]@{PlanId=$Plan.Id;RawOutput=$result.StdOut;Settings=@($script:GuiTestSettings);SettingsError=$parseError}
     }
     function Set-ManagedPowerPlan {
         param($Id)
@@ -199,14 +191,6 @@ try {
     foreach ($button in @($script:EnableButton,$script:CreateButton,$script:RenameButton,$script:DeleteButton,$script:ExportButton,$script:EditButton)) {
         Assert-Gui (-not $button.Enabled) ('No selection disables: ' + $button.Text)
     }
-    $queriesBeforeSelection=$script:GuiTestQueryCount
-    Select-TestPlan 1
-    Assert-Gui ($script:GuiTestQueryCount -eq $queriesBeforeSelection+1) 'Selecting a plan reads settings and details with one query.'
-    $script:GuiTestFailure='parse'
-    Select-TestPlan 0
-    Assert-Gui ($script:DetailsBox.Text.Contains($script:GuiTestPlans[0].Id)) 'Raw technical details remain available when settings parsing fails.'
-    Assert-Gui ($testForm.Tag.CommonHost.Controls[0].Text.Contains('Injected parse failure')) 'Settings parse failure appears in the common settings area.'
-    $script:GuiTestFailure=''
     Select-TestPlan 1
     Assert-Gui ($script:EnableButton.Enabled -and $script:DeleteButton.Enabled) 'Inactive plan enables switch and delete.'
     $callsBefore = $script:GuiTestCalls.Count

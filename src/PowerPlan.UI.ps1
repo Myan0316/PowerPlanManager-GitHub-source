@@ -38,15 +38,6 @@ namespace PowerPlanUi {
             if(Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics,new Rectangle(4,4,Width-8,Height-8),ForeColor,BackColor);
         }
     }
-    public class Form : System.Windows.Forms.Form {
-        public Form() { DoubleBuffered=true; SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
-    }
-    public class FlowLayoutPanel : System.Windows.Forms.FlowLayoutPanel {
-        public FlowLayoutPanel() { DoubleBuffered=true; SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
-    }
-    public class TableLayoutPanel : System.Windows.Forms.TableLayoutPanel {
-        public TableLayoutPanel() { DoubleBuffered=true; SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
-    }
 }
 '@
 }
@@ -199,8 +190,7 @@ function New-UiLabel([string]$Text,[int]$Size=10,[switch]$Muted) {
     return $label
 }
 function New-UiFlow {
-    Initialize-UiWidgets
-    $flow=New-Object PowerPlanUi.FlowLayoutPanel
+    $flow=New-Object Windows.Forms.FlowLayoutPanel
     $flow.AutoSize=$true;$flow.AutoSizeMode='GrowAndShrink';$flow.WrapContents=$true
     $flow.Margin=New-Object Windows.Forms.Padding(0,0,0,12)
     return $flow
@@ -216,16 +206,14 @@ function New-UiButton([string]$Text,[scriptblock]$Action,[switch]$Primary) {
     return $button
 }
 function New-UiPage {
-    Initialize-UiWidgets
-    $page=New-Object PowerPlanUi.FlowLayoutPanel
+    $page=New-Object Windows.Forms.FlowLayoutPanel
     $page.Dock='Fill';$page.FlowDirection='TopDown';$page.WrapContents=$false;$page.AutoScroll=$true
     $page.Padding=New-Object Windows.Forms.Padding(28,24,28,20)
     $page.Add_SizeChanged({param($sender,$eventArgs) Resize-UiPage $sender})
     return $page
 }
 function New-UiRow([int[]]$Widths) {
-    Initialize-UiWidgets
-    $row=New-Object PowerPlanUi.TableLayoutPanel
+    $row=New-Object Windows.Forms.TableLayoutPanel
     $row.ColumnCount=$Widths.Count;$row.RowCount=1;$row.AutoSize=$true;$row.AutoSizeMode='GrowAndShrink'
     $row.Margin=New-Object Windows.Forms.Padding(0,0,0,14)
     foreach($width in $Widths){
@@ -287,21 +275,17 @@ function Show-MainPage([string]$Name) {
     Update-AppTheme -Force
 }
 function Update-HomeSummary {
-    param([AllowNull()][object[]]$Settings,[string]$SettingsError='')
     $state=$script:MainForm.Tag;$plan=Get-SelectedPlan
     $active=@($script:Plans | Where-Object Id -eq $script:ActivePlanId)
     $state.ActiveLabel.Text=if($active.Count -eq 1){'正在使用 · '+$active[0].Name}else{'当前计划未知，请刷新'}
     $state.PlanHeading.Text=if($null -ne $plan){'正在查看 · '+$plan.Name}else{'选择一个电源计划'}
     $state.PlanHint.Text=if($null -eq $plan){'请刷新后选择计划。'}elseif($plan.Id -eq $script:ActivePlanId){'这个计划正在使用。调整前会自动备份，保存后重新读取核对。'}else{'正在查看未启用的计划。查看或修改它不会自动切换当前计划。'}
     $state.HomeSettings=@()
-    $nextControl=$null;$table=$null
-    if($null -eq $plan){$nextControl=New-UiLabel '请刷新后选择计划。' 10 -Muted}
+    foreach($c in @($state.CommonHost.Controls)){$state.CommonHost.Controls.Remove($c);$c.Dispose()}
+    if($null -eq $plan){return}
     try{
-        if($null -ne $plan -and -not $SettingsError){
-            if(-not $PSBoundParameters.ContainsKey('Settings')){$Settings=@(Get-PowerSettings -Plan $plan)}
-            $state.HomeSettings=@($Settings)
-        }
-        if($null -ne $plan -and -not $SettingsError){
+        $settings=@(Get-PowerSettings -Plan $plan)
+        $state.HomeSettings=$settings
         $table=New-UiRow @(0,122,122,88);$table.RowCount=1;$table.Margin=New-Object Windows.Forms.Padding(0)
         $table.Padding=New-Object Windows.Forms.Padding(0);$table.CellBorderStyle='None'
         $table.Add_CellPaint({param($sender,$eventArgs)
@@ -316,7 +300,7 @@ function Update-HomeSummary {
             $table.Controls.Add($label,$column,0);$column++
         }
         [void]$table.RowStyles.Add((New-Object Windows.Forms.RowStyle('AutoSize')))
-        foreach($setting in @($Settings | Sort-Object {if($_.SettingId -eq '3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e'){0}else{1}})){
+        foreach($setting in @($settings | Sort-Object {if($_.SettingId -eq '3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e'){0}else{1}})){
             $friendly=Get-FriendlySetting $setting
             if(-not $friendly.Time){continue}
             $card=New-UiFlow;$card.FlowDirection='TopDown';$card.WrapContents=$false;$card.Dock='Fill'
@@ -341,20 +325,10 @@ function Update-HomeSummary {
             [void]$table.RowStyles.Add((New-Object Windows.Forms.RowStyle('AutoSize')))
             $table.Controls.Add($card,0,$rowIndex);$table.Controls.Add($ac,1,$rowIndex);$table.Controls.Add($dc,2,$rowIndex);$table.Controls.Add($edit,3,$rowIndex)
         }
-        if($table.RowCount -gt 1){$nextControl=$table}else{$table.Dispose();$nextControl=New-UiLabel '本机没有提供可识别的屏幕/睡眠常用项。请在高级设置中查看实际项目。' 10 -Muted}
-        }
-        if($SettingsError){$nextControl=New-UiLabel ('常用设置读取失败：'+$SettingsError) 10 -Muted}
-    }catch{
-        if($null -ne $table -and -not $table.IsDisposed -and $table -ne $nextControl){$table.Dispose()}
-        $nextControl=New-UiLabel ('常用设置读取失败：'+$_.Exception.Message) 10 -Muted
-    }
-    Set-ControlPalette $nextControl (Get-UiPalette)
-    $page=$state.Pages['首页'];$page.SuspendLayout();$state.CommonHost.SuspendLayout()
-    try{
-        foreach($c in @($state.CommonHost.Controls)){$state.CommonHost.Controls.Remove($c);$c.Dispose()}
-        $state.CommonHost.Controls.Add($nextControl)
-        Resize-CommonCards
-    }finally{$state.CommonHost.ResumeLayout($true);$page.ResumeLayout($true)}
+        if($table.RowCount -gt 1){$state.CommonHost.Controls.Add($table)}else{$table.Dispose();$state.CommonHost.Controls.Add((New-UiLabel '本机没有提供可识别的屏幕/睡眠常用项。请在高级设置中查看实际项目。' 10 -Muted))}
+    }catch{$state.CommonHost.Controls.Add((New-UiLabel ('常用设置读取失败：'+$_.Exception.Message) 10 -Muted))}
+    Resize-CommonCards
+    Set-ControlPalette $state.CommonHost (Get-UiPalette)
 }
 function Resize-CommonCards {
     if($null -eq $script:MainForm -or $script:MainForm.IsDisposed){return}
@@ -377,13 +351,13 @@ function Show-CommonSetting([string]$SettingId) {
     Refresh-PlanList -PreferredId $plan.Id
 }
 function New-PowerMainForm {
-    Initialize-Desktop;Initialize-UiWidgets;Read-Appearance
+    Initialize-Desktop;Read-Appearance
     $script:Refreshing=$false;$script:UiBusy=$false;$script:ToolbarButtons=@()
-    $form=New-Object PowerPlanUi.Form
+    $form=New-Object Windows.Forms.Form
     $form.Text=$script:AppName;$form.StartPosition='CenterScreen';$form.Font=New-Object Drawing.Font('Microsoft YaHei UI',10)
     $form.AutoScaleMode='Dpi';$form.ClientSize=New-Object Drawing.Size(1180,780);$form.MinimumSize=New-Object Drawing.Size(1020,700)
     $script:MainForm=$form
-    $shell=New-Object PowerPlanUi.TableLayoutPanel;$shell.Dock='Fill';$shell.ColumnCount=2;$shell.RowCount=1;$shell.Name='Shell'
+    $shell=New-Object Windows.Forms.TableLayoutPanel;$shell.Dock='Fill';$shell.ColumnCount=2;$shell.RowCount=1;$shell.Name='Shell'
     [void]$shell.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle('Absolute',190)));[void]$shell.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle('Percent',100)))
     $nav=New-UiPage;$nav.Name='Shell';$nav.Padding=New-Object Windows.Forms.Padding(16,26,12,16);$nav.Margin=New-Object Windows.Forms.Padding(0)
     $nav.Controls.Add((New-UiLabel '电源计划' 18));$nav.Controls.Add((New-UiLabel '按你的习惯运行' 9 -Muted))
